@@ -55,7 +55,7 @@ class MongoReportRepository @Inject()(
 , indexes        = IndexModel(Indexes.ascending("serviceName", "serviceVersion"), IndexOptions().unique(true)) ::
                    IndexModel(Indexes.hashed("scanned"))                                                       ::
                    SlugInfoFlag.values.toList.map(f => IndexModel(Indexes.hashed(f.asString)))
-, replaceIndexes = true
+, replaceIndexes = false
 ) with Transactions
   with ReportRepository:
 
