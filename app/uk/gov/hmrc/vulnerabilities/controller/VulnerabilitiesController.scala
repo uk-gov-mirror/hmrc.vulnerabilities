@@ -49,6 +49,9 @@ class VulnerabilitiesController @Inject()(
   , curationStatus : Option[CurationStatus]
   ): Action[AnyContent] =
     Action.async: request =>
+      val start = System.nanoTime()
+      def diff() = (System.nanoTime() - start) / 1000000
+      logger.info("getSummaries start")
       // TODO flag is required if service + version are not provided
       given RequestHeader = request
       given Format[VulnerabilitySummary] = VulnerabilitySummary.apiFormat
@@ -57,10 +60,15 @@ class VulnerabilitiesController @Inject()(
                              case (None   , None, None) => Future.successful(None)
                              case (Some(s), _   , _   ) => Future.successful(Some(Seq(s)))
                              case (_      , _   , _   ) => teamService.services(team, digitalService).map(Some.apply)
+        _               =  logger.info(s"Debugging - serviceNames resolved after ${diff()}ms")
         reports         <- reportRepository.find(flag, serviceNames, version)
+        _               =  logger.info(s"Debugging - reports resolved after ${diff()}ms")
         artefactToTeams <- teamService.artefactToTeams()
+        _               =  logger.info(s"Debugging - artefactToTeams resolved after ${diff()}ms")
         firstDetected   <- vulnerabilityAgeRepository.firstDetected()
+        _               =  logger.info(s"Debugging - firstDetected resolved after ${diff()}ms")
         assessments     <- assessmentsRepository.getAssessments().map(_.map(a => a.id -> a).toMap)
+        _               =  logger.info(s"Debugging - assessments resolved after ${diff()}ms")
         allSummaries    =
                          for
                            report      <- reports
@@ -108,6 +116,7 @@ class VulnerabilitiesController @Inject()(
                              teams                = teams,
                              generatedDate        = report.generatedDate
                            )
+        _             = logger.info(s"Debugging - allSummaries resolved in ${diff()}ms")
         summaries     = allSummaries
                           .sortBy(_.generatedDate)
                           .groupBy(_.distinctVulnerability.id)
@@ -122,6 +131,7 @@ class VulnerabilitiesController @Inject()(
                                                  )
                             case (_, List(x: VulnerabilitySummary))
                                               => x
+        _             = logger.info(s"Debugging - summaries resolved in ${diff()}ms")
       yield Ok(Json.toJson(summaries))
 
   def getReportCounts(
