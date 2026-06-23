@@ -26,6 +26,7 @@ import uk.gov.hmrc.vulnerabilities.service.TeamService
 
 import javax.inject.{Inject, Singleton}
 import scala.concurrent.{Future, ExecutionContext}
+import scala.util.{Failure, Success}
 
 @Singleton()
 class VulnerabilitiesController @Inject()(
@@ -133,22 +134,37 @@ class VulnerabilitiesController @Inject()(
     Action.async: request =>
       given RequestHeader = request
       given Writes[TotalVulnerabilityCount] = TotalVulnerabilityCount.writes
+      val startedAt     = System.nanoTime()
+      val diagnosticsId = java.lang.Long.toHexString(startedAt)
+      logger.info(s"getReportCounts.start diagnosticsId=$diagnosticsId flag=${flag.asString} service=${service.map(_.asString)} team=${team.map(_.asString)} digitalService=${digitalService.map(_.asString)}")
       for
-        serviceNames <- (service, team, digitalService) match
-                          case (None   , None   , None) => Future.successful(None)
-                          case (Some(s), _      , _   ) => Future.successful(Some(Seq(s)))
-                          case (_      , _      , _   ) => teamService.services(team, digitalService).map(Some.apply)
-        reports      <- reportRepository.find(Some(flag), serviceNames, version = None)
-        assessments  <- assessmentsRepository.getAssessments()
-        result       =  reports.map: report =>
-                          val cves = report.rows.flatMap(_.cves.flatMap(_.cveId)).distinct
-                          TotalVulnerabilityCount(
-                            service              = report.serviceName
-                          , actionRequired       = cves.filter   (cveId => assessments.exists(a => a.id == cveId && a.curationStatus == CurationStatus.ActionRequired      )).size
-                          , noActionRequired     = cves.filter   (cveId => assessments.exists(a => a.id == cveId && a.curationStatus == CurationStatus.NoActionRequired    )).size
-                          , investigationOngoing = cves.filter   (cveId => assessments.exists(a => a.id == cveId && a.curationStatus == CurationStatus.InvestigationOngoing)).size
-                          , uncurated            = cves.filterNot(cveId => assessments.exists(a => a.id == cveId                                                           )).size
-                          )
+        serviceNames <- timedGetReportCounts(diagnosticsId, startedAt, "serviceNames")(
+                          (service, team, digitalService) match
+                            case (None   , None   , None) => Future.successful(None)
+                            case (Some(s), _      , _   ) => Future.successful(Some(Seq(s)))
+                            case (_      , _      , _   ) => teamService.services(team, digitalService).map(Some.apply)
+                        )(serviceNames => s"serviceNames=${serviceNames.fold("none")(_.size.toString)}")
+        reports      <- timedGetReportCounts(diagnosticsId, startedAt, "rawReports.find")(
+                          reportRepository.find(Some(flag), serviceNames, version = None)
+                        )(reports => s"reports=${reports.size} rows=${reports.map(_.rows.size).sum}")
+        assessments  <- timedGetReportCounts(diagnosticsId, startedAt, "assessments.find")(
+                          assessmentsRepository.getAssessments()
+                        )(assessments => s"assessments=${assessments.size}")
+        result       =
+                        val countStartedAt = System.nanoTime()
+                        val counts =
+                          reports.map: report =>
+                            val cves = report.rows.flatMap(_.cves.flatMap(_.cveId)).distinct
+                            TotalVulnerabilityCount(
+                              service              = report.serviceName
+                            , actionRequired       = cves.filter   (cveId => assessments.exists(a => a.id == cveId && a.curationStatus == CurationStatus.ActionRequired      )).size
+                            , noActionRequired     = cves.filter   (cveId => assessments.exists(a => a.id == cveId && a.curationStatus == CurationStatus.NoActionRequired    )).size
+                            , investigationOngoing = cves.filter   (cveId => assessments.exists(a => a.id == cveId && a.curationStatus == CurationStatus.InvestigationOngoing)).size
+                            , uncurated            = cves.filterNot(cveId => assessments.exists(a => a.id == cveId                                                           )).size
+                            )
+                        logger.info(s"getReportCounts.counts.done diagnosticsId=$diagnosticsId services=${counts.size} tookMillis=${elapsedMillis(countStartedAt)} totalTookMillis=${elapsedMillis(startedAt)}")
+                        counts
+        _            =  logger.info(s"getReportCounts.complete diagnosticsId=$diagnosticsId services=${result.size} totalTookMillis=${elapsedMillis(startedAt)}")
       yield Ok(Json.toJson(result))
 
   // temp endpoint till we work out how to display vulnerabilities on the service page
@@ -172,3 +188,12 @@ class VulnerabilitiesController @Inject()(
         if   reports.isEmpty
         then NotFound
         else Ok(Json.toJson(result))
+
+  private def timedGetReportCounts[A](diagnosticsId: String, totalStartedAt: Long, label: String)(future: Future[A])(details: A => String): Future[A] =
+    val stepStartedAt = System.nanoTime()
+    future.andThen:
+      case Success(value) => logger.info(s"getReportCounts.$label.done diagnosticsId=$diagnosticsId ${details(value)} tookMillis=${elapsedMillis(stepStartedAt)} totalTookMillis=${elapsedMillis(totalStartedAt)}")
+      case Failure(ex)    => logger.warn(s"getReportCounts.$label.failed diagnosticsId=$diagnosticsId tookMillis=${elapsedMillis(stepStartedAt)} totalTookMillis=${elapsedMillis(totalStartedAt)}", ex)
+
+  private def elapsedMillis(startedAt: Long): Long =
+    (System.nanoTime() - startedAt) / 1000000

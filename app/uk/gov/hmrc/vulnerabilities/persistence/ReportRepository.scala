@@ -19,7 +19,7 @@ package uk.gov.hmrc.vulnerabilities.persistence
 import org.mongodb.scala.ClientSession
 import org.mongodb.scala.bson.{BsonArray, BsonDocument, BsonDateTime}
 import org.mongodb.scala.model.{Aggregates, Field, Filters, IndexModel, IndexOptions, Indexes, ReplaceOptions, Sorts, Projections, Updates, UpdateOptions}
-import play.api.Configuration
+import play.api.{Configuration, Logging}
 import uk.gov.hmrc.mongo.MongoComponent
 import uk.gov.hmrc.mongo.transaction.{TransactionConfiguration, Transactions}
 import uk.gov.hmrc.mongo.play.json.{CollectionFactory, PlayMongoRepository}
@@ -28,6 +28,7 @@ import uk.gov.hmrc.vulnerabilities.model.{Report, ServiceName, SlugInfoFlag, Tim
 import java.time.Instant
 import javax.inject.{Inject, Singleton}
 import scala.concurrent.{ExecutionContext, Future}
+import scala.util.Failure
 
 trait ReportRepository:
   def exists(serviceName: ServiceName, version: Version): Future[Boolean]
@@ -57,7 +58,8 @@ class MongoReportRepository @Inject()(
                    SlugInfoFlag.values.toList.map(f => IndexModel(Indexes.hashed(f.asString)))
 , replaceIndexes = false
 ) with Transactions
-  with ReportRepository:
+  with ReportRepository
+  with Logging:
 
   // No ttl required for this collection - managed by SQS
   override lazy val requiresTtlIndex = false
@@ -95,14 +97,42 @@ class MongoReportRepository @Inject()(
   , serviceNames: Option[Seq[ServiceName]]
   , version     : Option[Version]
   ): Future[Seq[Report]] =
-    collection
-      .find(Filters.and(
-        serviceNames.fold(Filters.empty)(toServiceNameFilter)
-      , version     .fold(Filters.empty)(v => Filters.equal("serviceVersion", v.original))
-      , flag        .fold(Filters.empty)(f => Filters.equal(f.asString, true))
-      ))
-      .toFuture()
-      .map(_.map(report => report.copy(rows = report.rows.filter(row => exclusionRegex.r.matches(row.componentPhysicalPath)))))
+    val startedAt = System.nanoTime()
+    val details   = findDetails(flag, serviceNames, version)
+    val filter    = Filters.and(
+                      serviceNames.fold(Filters.empty)(toServiceNameFilter)
+                    , version     .fold(Filters.empty)(v => Filters.equal("serviceVersion", v.original))
+                    , flag        .fold(Filters.empty)(f => Filters.equal(f.asString, true))
+                    )
+    logger.info(s"rawReports.find.start $details")
+
+    val result =
+      collection
+        .find(filter)
+        .toFuture()
+        .map: reports =>
+          val rowsBeforeFilter = rowCount(reports)
+          logger.info(s"rawReports.find.fetch.done $details reports=${reports.size} rows=$rowsBeforeFilter tookMillis=${elapsedMillis(startedAt)}")
+
+          val filterStartedAt = System.nanoTime()
+          val filteredReports = filterReportRows(reports)
+          logger.info(s"rawReports.find.filter.done $details reports=${filteredReports.size} rowsBefore=$rowsBeforeFilter rowsAfter=${rowCount(filteredReports)} tookMillis=${elapsedMillis(filterStartedAt)} totalTookMillis=${elapsedMillis(startedAt)}")
+          filteredReports
+
+    result.andThen:
+      case Failure(ex) => logger.warn(s"rawReports.find.failed $details tookMillis=${elapsedMillis(startedAt)}", ex)
+
+  private def filterReportRows(reports: Seq[Report]): Seq[Report] =
+    reports.map(report => report.copy(rows = report.rows.filter(row => exclusionRegex.r.matches(row.componentPhysicalPath))))
+
+  private def rowCount(reports: Seq[Report]): Int =
+    reports.map(_.rows.size).sum
+
+  private def findDetails(flag: Option[SlugInfoFlag], serviceNames: Option[Seq[ServiceName]], version: Option[Version]): String =
+    s"flag=${flag.fold("none")(_.asString)} serviceNames=${serviceNames.fold("none")(_.size.toString)} version=${version.fold("none")(_.original)}"
+
+  private def elapsedMillis(startedAt: Long): Long =
+    (System.nanoTime() - startedAt) / 1000000
 
   override def findDeployed(serviceName: ServiceName): Future[Seq[Report]] =
     collection
@@ -111,14 +141,14 @@ class MongoReportRepository @Inject()(
       , Filters.or(deployedSlugsInfoFlags.map(f => Filters.equal(f.asString, true)): _*)
       ))
       .toFuture()
-      .map(_.map(report => report.copy(rows = report.rows.filter(row => exclusionRegex.r.matches(row.componentPhysicalPath)))))
+      .map(filterReportRows)
 
   override def findFlagged(): Future[Seq[Report]] =
     collection
       .find(Filters.or(SlugInfoFlag.values.map(f => Filters.equal(f.asString, true)): _*))
       .sort(Sorts.ascending("serviceName"))
       .toFuture()
-      .map(_.map(report => report.copy(rows = report.rows.filter(row => exclusionRegex.r.matches(row.componentPhysicalPath)))))
+      .map(filterReportRows)
 
   override def put(report: Report): Future[Unit] =
     withSessionAndTransaction: session =>
