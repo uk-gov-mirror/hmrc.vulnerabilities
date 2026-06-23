@@ -133,23 +133,27 @@ class VulnerabilitiesController @Inject()(
     Action.async: request =>
       given RequestHeader = request
       given Writes[TotalVulnerabilityCount] = TotalVulnerabilityCount.writes
-      for
-        serviceNames <- (service, team, digitalService) match
-                          case (None   , None   , None) => Future.successful(None)
-                          case (Some(s), _      , _   ) => Future.successful(Some(Seq(s)))
-                          case (_      , _      , _   ) => teamService.services(team, digitalService).map(Some.apply)
-        reports      <- reportRepository.find(Some(flag), serviceNames, version = None)
-        assessments  <- assessmentsRepository.getAssessments()
-        result       =  reports.map: report =>
-                          val cves = report.rows.flatMap(_.cves.flatMap(_.cveId)).distinct
-                          TotalVulnerabilityCount(
-                            service              = report.serviceName
-                          , actionRequired       = cves.filter   (cveId => assessments.exists(a => a.id == cveId && a.curationStatus == CurationStatus.ActionRequired      )).size
-                          , noActionRequired     = cves.filter   (cveId => assessments.exists(a => a.id == cveId && a.curationStatus == CurationStatus.NoActionRequired    )).size
-                          , investigationOngoing = cves.filter   (cveId => assessments.exists(a => a.id == cveId && a.curationStatus == CurationStatus.InvestigationOngoing)).size
-                          , uncurated            = cves.filterNot(cveId => assessments.exists(a => a.id == cveId                                                           )).size
-                          )
-      yield Ok(Json.toJson(result))
+      def countsFromReports(serviceNames: Option[Seq[ServiceName]]) =
+        for
+          reports     <- reportRepository.find(Some(flag), serviceNames, version = None)
+          assessments <- assessmentsRepository.getAssessments()
+        yield reports.map: report =>
+          val cves = report.rows.flatMap(_.cves.flatMap(_.cveId)).distinct
+          TotalVulnerabilityCount(
+            service              = report.serviceName
+          , actionRequired       = cves.filter   (cveId => assessments.exists(a => a.id == cveId && a.curationStatus == CurationStatus.ActionRequired      )).size
+          , noActionRequired     = cves.filter   (cveId => assessments.exists(a => a.id == cveId && a.curationStatus == CurationStatus.NoActionRequired    )).size
+          , investigationOngoing = cves.filter   (cveId => assessments.exists(a => a.id == cveId && a.curationStatus == CurationStatus.InvestigationOngoing)).size
+          , uncurated            = cves.filterNot(cveId => assessments.exists(a => a.id == cveId                                                           )).size
+          )
+
+      val result =
+        (service, team, digitalService) match
+          case (None   , None, None) => reportRepository.getReportCounts(flag)
+          case (Some(s), _   , _   ) => countsFromReports(Some(Seq(s)))
+          case (_      , _   , _   ) => teamService.services(team, digitalService).flatMap(serviceNames => countsFromReports(Some(serviceNames)))
+
+      result.map(counts => Ok(Json.toJson(counts)))
 
   // temp endpoint till we work out how to display vulnerabilities on the service page
   def getDeployedReportCount(

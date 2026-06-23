@@ -23,7 +23,7 @@ import org.scalatest.wordspec.AnyWordSpec
 import play.api.Configuration
 import uk.gov.hmrc.mongo.play.json.CollectionFactory
 import uk.gov.hmrc.mongo.test.DefaultPlayMongoRepositorySupport
-import uk.gov.hmrc.vulnerabilities.model.{Assessment, CurationStatus, ImportedBy, Report, TimelineEvent, ServiceName, Version}
+import uk.gov.hmrc.vulnerabilities.model.{Assessment, CurationStatus, ImportedBy, Report, SlugInfoFlag, TimelineEvent, TotalVulnerabilityCount, ServiceName, Version}
 
 import java.time.Instant
 import scala.collection.immutable.Seq
@@ -103,6 +103,34 @@ class ReportRepositorySpec
       res.length shouldBe 1
       res should contain theSameElementsAs Seq(
         TimelineEvent(id = "CVE-2022-12345", service = "service1", weekBeginning = Instant.parse("2022-12-19T00:00:00.00Z"), teams = Seq(), curationStatus = CurationStatus.NoActionRequired)
+      )
+
+  "getReportCounts" should:
+    "calculate counts by service from distinct CVEs in matching reports" in new Setup:
+      val duplicateNoActionRequired = report1.rows.head
+      val uncurated                 = report1.rows.head.copy(cves = Seq(Report.CVE(cveId = Some("CVE-DOES-NOT-EXIST"), cveV3Score = None, cveV3Vector = None)))
+      val noCve                     = report1.rows.head.copy(cves = Seq(Report.CVE(cveId = None, cveV3Score = None, cveV3Vector = None)), issueId = "XRAY-IGNORED")
+      val excluded                  = report1.rows.head.copy(
+                                        cves                  = Seq(Report.CVE(cveId = Some("CVE-EXCLUDED"), cveV3Score = None, cveV3Vector = None)),
+                                        componentPhysicalPath = "service1-1.0.4/lib/net.sf.ehcache.ehcache-2.10.9.2.jar/rest-management-private-classpath/META-INF/maven/foo"
+                                      )
+      val service1                  = report1.copy(rows = report1.rows ++ Seq(duplicateNoActionRequired, uncurated, noCve, excluded))
+
+      repository.collection.insertMany(Seq(service1, report2)).toFuture().futureValue
+      assessmentsCollection.insertMany(assessments).toFuture().futureValue
+
+      repository.getReportCounts(SlugInfoFlag.Latest).futureValue should contain theSameElementsAs Seq(
+        TotalVulnerabilityCount(service = ServiceName("service1"), actionRequired = 0, noActionRequired = 1, investigationOngoing = 0, uncurated = 1),
+        TotalVulnerabilityCount(service = ServiceName("service2"), actionRequired = 1, noActionRequired = 1, investigationOngoing = 0, uncurated = 0)
+      )
+
+    "return zero counts for matching reports without CVEs" in new Setup:
+      val emptyReport = report1.copy(serviceName = ServiceName("empty-service"), rows = Seq.empty)
+
+      repository.collection.insertOne(emptyReport).toFuture().futureValue
+
+      repository.getReportCounts(SlugInfoFlag.Latest).futureValue shouldBe Seq(
+        TotalVulnerabilityCount(service = ServiceName("empty-service"), actionRequired = 0, noActionRequired = 0, investigationOngoing = 0, uncurated = 0)
       )
 
   trait Setup:

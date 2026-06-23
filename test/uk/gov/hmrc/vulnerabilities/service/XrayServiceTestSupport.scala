@@ -82,6 +82,9 @@ object XrayServiceTestSupport:
         store.values.toSeq.filter(r => serviceNames.forall(_.contains(r.serviceName)) && version.forall(_ == r.serviceVersion))
       )
 
+    override def getReportCounts(flag: SlugInfoFlag): Future[Seq[TotalVulnerabilityCount]] =
+      Future.successful(Seq.empty)
+
     override def exists(serviceName: ServiceName, version: Version): Future[Boolean] =
       Future.successful(store.values.exists(r => r.serviceName == serviceName && r.serviceVersion == version))
 
@@ -137,7 +140,6 @@ object XrayServiceTestSupport:
       Future.successful(Seq.empty)
       
   
-
 
 
 

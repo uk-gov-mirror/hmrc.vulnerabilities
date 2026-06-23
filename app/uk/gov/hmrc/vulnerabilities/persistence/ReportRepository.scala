@@ -16,14 +16,15 @@
 
 package uk.gov.hmrc.vulnerabilities.persistence
 
+import org.bson.conversions.Bson
 import org.mongodb.scala.ClientSession
 import org.mongodb.scala.bson.{BsonArray, BsonDocument, BsonDateTime}
-import org.mongodb.scala.model.{Aggregates, Field, Filters, IndexModel, IndexOptions, Indexes, ReplaceOptions, Sorts, Projections, Updates, UpdateOptions}
+import org.mongodb.scala.model.{Accumulators, Aggregates, Field, Filters, IndexModel, IndexOptions, Indexes, ReplaceOptions, Sorts, Projections, UnwindOptions, Updates, UpdateOptions}
 import play.api.Configuration
 import uk.gov.hmrc.mongo.MongoComponent
 import uk.gov.hmrc.mongo.transaction.{TransactionConfiguration, Transactions}
 import uk.gov.hmrc.mongo.play.json.{CollectionFactory, PlayMongoRepository}
-import uk.gov.hmrc.vulnerabilities.model.{Report, ServiceName, SlugInfoFlag, TimelineEvent, Version}
+import uk.gov.hmrc.vulnerabilities.model.{CurationStatus, Report, ServiceName, SlugInfoFlag, TimelineEvent, TotalVulnerabilityCount, Version}
 
 import java.time.Instant
 import javax.inject.{Inject, Singleton}
@@ -32,6 +33,7 @@ import scala.concurrent.{ExecutionContext, Future}
 trait ReportRepository:
   def exists(serviceName: ServiceName, version: Version): Future[Boolean]
   def find(flag: Option[SlugInfoFlag], serviceNames: Option[Seq[ServiceName]], version: Option[Version]): Future[Seq[Report]]
+  def getReportCounts(flag: SlugInfoFlag): Future[Seq[TotalVulnerabilityCount]]
   def findDeployed(serviceName: ServiceName): Future[Seq[Report]]
   def findFlagged(): Future[Seq[Report]]
   def put(report: Report): Future[Unit]
@@ -103,6 +105,86 @@ class MongoReportRepository @Inject()(
       ))
       .toFuture()
       .map(_.map(report => report.copy(rows = report.rows.filter(row => exclusionRegex.r.matches(row.componentPhysicalPath)))))
+
+  override def getReportCounts(flag: SlugInfoFlag): Future[Seq[TotalVulnerabilityCount]] =
+    collection
+      .aggregate[BsonDocument](reportCountsPipeline(flag))
+      .toFuture()
+      .map(_.map(toTotalVulnerabilityCount))
+
+  private def reportCountsPipeline(flag: SlugInfoFlag): Seq[Bson] =
+    Seq(
+      Aggregates.`match`(Filters.equal(flag.asString, true)),
+      unwindPreservingEmptyArrays("$rows"),
+      unwindPreservingEmptyArrays("$rows.cves"),
+      Aggregates.set(Field("id", BsonDocument("$cond" -> BsonArray(countableCve, "$rows.cves.cve", false)))),
+      Aggregates.group(BsonDocument("service" -> "$serviceName", "id" -> "$id")),
+      Aggregates.replaceRoot("$_id"),
+      Aggregates.lookup(
+        from         = "assessments",
+        localField   = "id",
+        foreignField = "id",
+        as           = "assessment"
+      ),
+      Aggregates.set(Field(
+        "curationStatus",
+        BsonDocument("$ifNull" -> BsonArray(BsonDocument("$arrayElemAt" -> BsonArray("$assessment.curationStatus", 0)), CurationStatus.Uncurated.asString))
+      )),
+      Aggregates.group(
+        "$service",
+        countWhen("actionRequired"      , CurationStatus.ActionRequired),
+        countWhen("noActionRequired"    , CurationStatus.NoActionRequired),
+        countWhen("investigationOngoing", CurationStatus.InvestigationOngoing),
+        countWhen("uncurated"           , CurationStatus.Uncurated)
+      ),
+      Aggregates.project(Projections.fields(
+        Projections.excludeId(),
+        Projections.computed("service", "$_id"),
+        Projections.include("actionRequired", "noActionRequired", "investigationOngoing", "uncurated")
+      )),
+      Aggregates.sort(Sorts.ascending("service"))
+    )
+
+  private def unwindPreservingEmptyArrays(fieldName: String): Bson =
+    Aggregates.unwind(fieldName, UnwindOptions().preserveNullAndEmptyArrays(true))
+
+  private def countableCve: BsonDocument =
+    BsonDocument("$and" -> BsonArray(
+      includedRow,
+      stringField("$rows.cves.cve")
+    ))
+
+  private def includedRow: BsonDocument =
+    BsonDocument("$cond" -> BsonArray(
+      stringField("$rows.component_physical_path"),
+      BsonDocument("$regexMatch" -> BsonDocument("input" -> "$rows.component_physical_path", "regex" -> exclusionRegex)),
+      false
+    ))
+
+  private def stringField(fieldName: String): BsonDocument =
+    BsonDocument("$eq" -> BsonArray(BsonDocument("$type" -> fieldName), "string"))
+
+  private def countWhen(fieldName: String, curationStatus: CurationStatus) =
+    Accumulators.sum(
+      fieldName,
+      BsonDocument("$cond" -> BsonArray(
+        BsonDocument("$and" -> BsonArray(
+          stringField("$id"),
+          BsonDocument("$eq" -> BsonArray("$curationStatus", curationStatus.asString))
+        )),
+        1,
+        0
+      ))
+    )
+
+  private def toTotalVulnerabilityCount(bson: BsonDocument): TotalVulnerabilityCount =
+    TotalVulnerabilityCount(
+      service              = ServiceName(bson.getString("service").getValue),
+      actionRequired       = bson.getNumber("actionRequired").intValue(),
+      noActionRequired     = bson.getNumber("noActionRequired").intValue(),
+      investigationOngoing = bson.getNumber("investigationOngoing").intValue(),
+      uncurated            = bson.getNumber("uncurated").intValue()
+      )
 
   override def findDeployed(serviceName: ServiceName): Future[Seq[Report]] =
     collection
