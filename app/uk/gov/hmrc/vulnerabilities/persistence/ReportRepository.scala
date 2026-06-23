@@ -16,6 +16,7 @@
 
 package uk.gov.hmrc.vulnerabilities.persistence
 
+import org.bson.conversions.Bson
 import org.mongodb.scala.ClientSession
 import org.mongodb.scala.bson.{BsonArray, BsonDocument, BsonDateTime}
 import org.mongodb.scala.model.{Aggregates, Field, Filters, IndexModel, IndexOptions, Indexes, ReplaceOptions, Sorts, Projections, Updates, UpdateOptions}
@@ -28,7 +29,7 @@ import uk.gov.hmrc.vulnerabilities.model.{Report, ServiceName, SlugInfoFlag, Tim
 import java.time.Instant
 import javax.inject.{Inject, Singleton}
 import scala.concurrent.{ExecutionContext, Future}
-import scala.util.Failure
+import scala.util.{Failure, Success}
 
 trait ReportRepository:
   def exists(serviceName: ServiceName, version: Version): Future[Boolean]
@@ -69,6 +70,9 @@ class MongoReportRepository @Inject()(
 
   private val exclusionRegex: String = config.get[String]("regex.exclusion")
 
+  private lazy val rawReportsCollection =
+    mongoComponent.database.getCollection[BsonDocument]("rawReports")
+
   private val deployedSlugsInfoFlags: List[SlugInfoFlag] =
     SlugInfoFlag.values.toList.filterNot(Seq(SlugInfoFlag.Latest, SlugInfoFlag.Integration, SlugInfoFlag.Development).contains)
 
@@ -105,6 +109,8 @@ class MongoReportRepository @Inject()(
                     , flag        .fold(Filters.empty)(f => Filters.equal(f.asString, true))
                     )
     logger.info(s"rawReports.find.start $details")
+    logCountDocuments(filter, details, startedAt)
+    logRawProjectedFind(filter, details, startedAt)
 
     val result =
       collection
@@ -121,6 +127,33 @@ class MongoReportRepository @Inject()(
 
     result.andThen:
       case Failure(ex) => logger.warn(s"rawReports.find.failed $details tookMillis=${elapsedMillis(startedAt)}", ex)
+
+  private def logCountDocuments(filter: Bson, details: String, totalStartedAt: Long): Unit =
+    val startedAt = System.nanoTime()
+    collection
+      .countDocuments(filter)
+      .toFuture()
+      .andThen:
+        case Success(count) => logger.info(s"rawReports.find.countDocuments.done $details documents=$count tookMillis=${elapsedMillis(startedAt)} totalTookMillis=${elapsedMillis(totalStartedAt)}")
+        case Failure(ex)    => logger.warn(s"rawReports.find.countDocuments.failed $details tookMillis=${elapsedMillis(startedAt)} totalTookMillis=${elapsedMillis(totalStartedAt)}", ex)
+
+  private def logRawProjectedFind(filter: Bson, details: String, totalStartedAt: Long): Unit =
+    val startedAt = System.nanoTime()
+    rawReportsCollection
+      .find(filter)
+      .projection(Projections.fields(
+        Projections.include("serviceName", "rows.cves.cve", "rows.component_physical_path"),
+        Projections.excludeId()
+      ))
+      .toFuture()
+      .map: documents =>
+        val rows = documents.map(rawRowCount).sum
+        logger.info(s"rawReports.find.rawProjected.done $details documents=${documents.size} rows=$rows tookMillis=${elapsedMillis(startedAt)} totalTookMillis=${elapsedMillis(totalStartedAt)}")
+      .andThen:
+        case Failure(ex) => logger.warn(s"rawReports.find.rawProjected.failed $details tookMillis=${elapsedMillis(startedAt)} totalTookMillis=${elapsedMillis(totalStartedAt)}", ex)
+
+  private def rawRowCount(document: BsonDocument): Int =
+    Option(document.get("rows")).map(_.asArray().size()).getOrElse(0)
 
   private def filterReportRows(reports: Seq[Report]): Seq[Report] =
     reports.map(report => report.copy(rows = report.rows.filter(row => exclusionRegex.r.matches(row.componentPhysicalPath))))
