@@ -82,6 +82,11 @@ object XrayServiceTestSupport:
         store.values.toSeq.filter(r => serviceNames.forall(_.contains(r.serviceName)) && version.forall(_ == r.serviceVersion))
       )
 
+    override def findByVulnerabilityIds(slugInfoFlag: Option[SlugInfoFlag], serviceNames: Option[Seq[ServiceName]], version: Option[Version], vulnerabilityIds: Seq[String]): Future[Seq[Report]] =
+      find(slugInfoFlag, serviceNames, version)
+        .map(_.map(report => report.copy(rows = report.rows.filter(row => row.cves.exists(_.cveId.exists(vulnerabilityIds.contains)) || vulnerabilityIds.contains(row.issueId)))))
+        .map(_.filter(_.rows.nonEmpty))
+
     override def exists(serviceName: ServiceName, version: Version): Future[Boolean] =
       Future.successful(store.values.exists(r => r.serviceName == serviceName && r.serviceVersion == version))
 
@@ -137,7 +142,6 @@ object XrayServiceTestSupport:
       Future.successful(Seq.empty)
       
   
-
 
 
 
