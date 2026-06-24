@@ -23,7 +23,7 @@ import org.scalatest.wordspec.AnyWordSpec
 import play.api.Configuration
 import uk.gov.hmrc.mongo.play.json.CollectionFactory
 import uk.gov.hmrc.mongo.test.DefaultPlayMongoRepositorySupport
-import uk.gov.hmrc.vulnerabilities.model.{Assessment, CurationStatus, ImportedBy, Report, TimelineEvent, ServiceName, Version}
+import uk.gov.hmrc.vulnerabilities.model.{Assessment, CurationStatus, ImportedBy, Report, TimelineEvent, ServiceName, SlugInfoFlag, Version}
 
 import java.time.Instant
 import scala.collection.immutable.Seq
@@ -51,6 +51,13 @@ class ReportRepositorySpec
     "by service name" in new Setup:
       repository.collection.insertOne(report1).toFuture().futureValue
       repository.find(flag = None, serviceNames = Some(Seq(report1.serviceName)), version = Some(report1.serviceVersion)).futureValue shouldBe Seq(report1)
+
+    "by vulnerability ids and only return matching rows" in new Setup:
+      repository.collection.insertOne(report2).toFuture().futureValue
+
+      repository
+        .findByVulnerabilityIds(flag = Some(SlugInfoFlag.Latest), serviceNames = None, version = None, vulnerabilityIds = Seq("CVE-2021-99999"))
+        .futureValue shouldBe Seq(report2.copy(rows = Seq(report2.rows.head)))
 
   "getTimelineData" should:
     "parse issue id for vulnerabilities with AND without CVE ids" in new Setup:

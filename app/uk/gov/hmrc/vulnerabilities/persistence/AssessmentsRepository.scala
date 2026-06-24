@@ -16,10 +16,10 @@
 
 package uk.gov.hmrc.vulnerabilities.persistence
 
-import org.mongodb.scala.model.{IndexModel, IndexOptions, Indexes}
+import org.mongodb.scala.model.{Filters, IndexModel, IndexOptions, Indexes}
 import uk.gov.hmrc.mongo.MongoComponent
 import uk.gov.hmrc.mongo.play.json.PlayMongoRepository
-import uk.gov.hmrc.vulnerabilities.model.Assessment
+import uk.gov.hmrc.vulnerabilities.model.{Assessment, CurationStatus}
 
 import javax.inject.{Inject, Singleton}
 import scala.concurrent.{ExecutionContext, Future}
@@ -39,5 +39,7 @@ class AssessmentsRepository @Inject()(
   override lazy val requiresTtlIndex = false
 
   // Note assessments are inserted into Mongo directly
-  def getAssessments(): Future[Seq[Assessment]] =
-    collection.find().toFuture()
+  def getAssessments(curationStatus: Option[CurationStatus] = None): Future[Seq[Assessment]] =
+    collection
+      .find(curationStatus.fold(Filters.empty)(cs => Filters.equal("curationStatus", cs.asString)))
+      .toFuture()

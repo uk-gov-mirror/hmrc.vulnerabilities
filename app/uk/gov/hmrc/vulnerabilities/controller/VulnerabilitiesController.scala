@@ -52,15 +52,18 @@ class VulnerabilitiesController @Inject()(
       // TODO flag is required if service + version are not provided
       given RequestHeader = request
       given Format[VulnerabilitySummary] = VulnerabilitySummary.apiFormat
+      val assessedCurationStatus = curationStatus.filterNot(_ == CurationStatus.Uncurated)
       for
         serviceNames    <- (service, team, digitalService) match
                              case (None   , None, None) => Future.successful(None)
                              case (Some(s), _   , _   ) => Future.successful(Some(Seq(s)))
                              case (_      , _   , _   ) => teamService.services(team, digitalService).map(Some.apply)
-        reports         <- reportRepository.find(flag, serviceNames, version)
+        assessments     <- assessmentsRepository.getAssessments(assessedCurationStatus).map(_.map(a => a.id -> a).toMap)
+        reports         <- assessedCurationStatus match
+                             case Some(_) => reportRepository.findByVulnerabilityIds(flag, serviceNames, version, assessments.keys.toSeq)
+                             case None    => reportRepository.find(flag, serviceNames, version)
         artefactToTeams <- teamService.artefactToTeams()
         firstDetected   <- vulnerabilityAgeRepository.firstDetected()
-        assessments     <- assessmentsRepository.getAssessments().map(_.map(a => a.id -> a).toMap)
         allSummaries    =
                          for
                            report      <- reports

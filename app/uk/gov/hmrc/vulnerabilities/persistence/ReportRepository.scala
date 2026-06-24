@@ -17,8 +17,9 @@
 package uk.gov.hmrc.vulnerabilities.persistence
 
 import org.mongodb.scala.ClientSession
-import org.mongodb.scala.bson.{BsonArray, BsonDocument, BsonDateTime}
+import org.mongodb.scala.bson.{BsonArray, BsonDocument, BsonDateTime, BsonString}
 import org.mongodb.scala.model.{Aggregates, Field, Filters, IndexModel, IndexOptions, Indexes, ReplaceOptions, Sorts, Projections, Updates, UpdateOptions}
+import org.bson.conversions.Bson
 import play.api.Configuration
 import uk.gov.hmrc.mongo.MongoComponent
 import uk.gov.hmrc.mongo.transaction.{TransactionConfiguration, Transactions}
@@ -32,6 +33,7 @@ import scala.concurrent.{ExecutionContext, Future}
 trait ReportRepository:
   def exists(serviceName: ServiceName, version: Version): Future[Boolean]
   def find(flag: Option[SlugInfoFlag], serviceNames: Option[Seq[ServiceName]], version: Option[Version]): Future[Seq[Report]]
+  def findByVulnerabilityIds(flag: Option[SlugInfoFlag], serviceNames: Option[Seq[ServiceName]], version: Option[Version], vulnerabilityIds: Seq[String]): Future[Seq[Report]]
   def findDeployed(serviceName: ServiceName): Future[Seq[Report]]
   def findFlagged(): Future[Seq[Report]]
   def put(report: Report): Future[Unit]
@@ -96,13 +98,75 @@ class MongoReportRepository @Inject()(
   , version     : Option[Version]
   ): Future[Seq[Report]] =
     collection
-      .find(Filters.and(
-        serviceNames.fold(Filters.empty)(toServiceNameFilter)
-      , version     .fold(Filters.empty)(v => Filters.equal("serviceVersion", v.original))
-      , flag        .fold(Filters.empty)(f => Filters.equal(f.asString, true))
-      ))
+      .find(reportFilter(flag, serviceNames, version))
       .toFuture()
-      .map(_.map(report => report.copy(rows = report.rows.filter(row => exclusionRegex.r.matches(row.componentPhysicalPath)))))
+      .map(filterReportRows)
+
+  override def findByVulnerabilityIds(
+    flag            : Option[SlugInfoFlag],
+    serviceNames    : Option[Seq[ServiceName]],
+    version         : Option[Version],
+    vulnerabilityIds: Seq[String]
+  ): Future[Seq[Report]] =
+    val distinctIds = vulnerabilityIds.distinct
+    if distinctIds.isEmpty
+    then Future.successful(Seq.empty)
+    else
+      collection
+        .aggregate(
+          Seq(
+            Aggregates.`match`(Filters.and(reportFilter(flag, serviceNames, version), vulnerabilityIdFilter(distinctIds))),
+            Aggregates.set(
+              Field("rows", BsonDocument(
+                "$filter" -> BsonDocument(
+                  "input" -> "$rows",
+                  "as"    -> "row",
+                  "cond"  -> rowMatchesVulnerabilityIds(distinctIds)
+                )
+              ))
+            ),
+            Aggregates.`match`(Filters.exists("rows.0"))
+          )
+        )
+        .toFuture()
+        .map(filterReportRows)
+
+  private def reportFilter(
+    flag        : Option[SlugInfoFlag],
+    serviceNames: Option[Seq[ServiceName]],
+    version     : Option[Version]
+  ): Bson =
+    Filters.and(
+      serviceNames.fold(Filters.empty)(toServiceNameFilter),
+      version     .fold(Filters.empty)(v => Filters.equal("serviceVersion", v.original)),
+      flag        .fold(Filters.empty)(f => Filters.equal(f.asString, true))
+    )
+
+  private def vulnerabilityIdFilter(vulnerabilityIds: Seq[String]): Bson =
+    Filters.or(
+      Filters.in("rows.cves.cve", vulnerabilityIds: _*),
+      Filters.in("rows.issue_id", vulnerabilityIds: _*)
+    )
+
+  private def rowMatchesVulnerabilityIds(vulnerabilityIds: Seq[String]): BsonDocument =
+    val ids = BsonArray(vulnerabilityIds.map(BsonString.apply))
+    BsonDocument("$or" -> BsonArray(
+      BsonDocument("$in" -> BsonArray("$$row.issue_id", ids)),
+      BsonDocument("$gt" -> BsonArray(
+        BsonDocument("$size" -> BsonDocument("$setIntersection" -> BsonArray(
+          BsonDocument("$map" -> BsonDocument(
+            "input" -> BsonDocument("$ifNull" -> BsonArray("$$row.cves", BsonArray())),
+            "as"    -> "cve",
+            "in"    -> "$$cve.cve"
+          )),
+          ids
+        ))),
+        0
+      ))
+    ))
+
+  private def filterReportRows(reports: Seq[Report]): Seq[Report] =
+    reports.map(report => report.copy(rows = report.rows.filter(row => exclusionRegex.r.matches(row.componentPhysicalPath))))
 
   override def findDeployed(serviceName: ServiceName): Future[Seq[Report]] =
     collection
@@ -111,14 +175,14 @@ class MongoReportRepository @Inject()(
       , Filters.or(deployedSlugsInfoFlags.map(f => Filters.equal(f.asString, true)): _*)
       ))
       .toFuture()
-      .map(_.map(report => report.copy(rows = report.rows.filter(row => exclusionRegex.r.matches(row.componentPhysicalPath)))))
+      .map(filterReportRows)
 
   override def findFlagged(): Future[Seq[Report]] =
     collection
       .find(Filters.or(SlugInfoFlag.values.map(f => Filters.equal(f.asString, true)): _*))
       .sort(Sorts.ascending("serviceName"))
       .toFuture()
-      .map(_.map(report => report.copy(rows = report.rows.filter(row => exclusionRegex.r.matches(row.componentPhysicalPath)))))
+      .map(filterReportRows)
 
   override def put(report: Report): Future[Unit] =
     withSessionAndTransaction: session =>
