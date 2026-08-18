@@ -76,7 +76,7 @@ class XrayConnector @Inject() (
         "Authorization" -> s"Bearer ${token.accessToken.decryptedValue}",
         "Content-Type"  -> "application/json"
       ).withBody(Json.parse(
-        s"""{"name":"${toReportName(serviceName, version)}","resources":{"repositories":[{"name":"webstore-local"}]},"filters":{"impacted_artifact":"*/$artefactName"}}"""
+        s"""{"name":"${toReportName(serviceName, version)}","resources":{"repositories":[{"name":"webstore"}]},"filters":{"impacted_artifact":"*/$artefactName"}}"""
       ))
       .execute[ReportResponse]
 
