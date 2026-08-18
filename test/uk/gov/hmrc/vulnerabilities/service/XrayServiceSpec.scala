@@ -142,7 +142,7 @@ class XrayServiceSpec
 
         fakeXrayConnector.generateReportRequests should contain only(
           (ServiceName("platops-example-backend-microservice"), Version("0.230.0"),
-            "webstore-local/slugs/platops-example-backend-microservice/platops-example-backend-microservice_0.230.0_0.5.2.tgz")
+            "webstore/slugs/platops-example-backend-microservice/platops-example-backend-microservice_0.230.0_0.5.2.tgz")
         )
         fakeXrayConnector.downloadAndUnzipReportRequests should contain only (
           (testReportId, ServiceName("platops-example-backend-microservice"), Version("0.230.0"))
@@ -164,7 +164,7 @@ class XrayServiceSpec
 
   private def storedReport(
     serviceVersion: Version = Version("0.230.0"),
-    slugUri: String = "https://repo/webstore-local/slugs/platops-example-backend-microservice/platops-example-backend-microservice_0.230.0_0.5.2.tgz",
+    slugUri: String = "https://repo/webstore/slugs/platops-example-backend-microservice/platops-example-backend-microservice_0.230.0_0.5.2.tgz",
     generatedDate: Instant,
     scanned: Boolean,
     latest: Boolean = false,
@@ -206,7 +206,7 @@ class XrayServiceSpec
           "generic://sha256:4e8a41cc125be3aa57dec94d45e338798d6d78c3e53fe5ae7e02f8b5d3841f30/platops-example-backend-microservice_0.230.0_0.5.2.tgz",
           "gav://com.fasterxml.jackson.core:jackson-core:2.14.3"
           ),
-        path = "webstore-local/slugs/platops-example-backend-microservice/platops-example-backend-microservice_0.230.0_0.5.2.tgz",
+        path = "webstore/slugs/platops-example-backend-microservice/platops-example-backend-microservice_0.230.0_0.5.2.tgz",
         fixedVersions = Seq("2.15.0"),
         published = Instant.parse("2025-06-27T16:18:39Z"),
         artefactScanTime = Instant.parse("2024-11-07T15:57:37Z"),
@@ -230,7 +230,7 @@ class XrayServiceSpec
           "generic://sha256:4e8a41cc125be3aa57dec94d45e338798d6d78c3e53fe5ae7e02f8b5d3841f30/platops-example-backend-microservice_0.230.0_0.5.2.tgz",
           "gav://org.lz4:lz4-java:1.8.0"
           ),
-        path = "webstore-local/slugs/platops-example-backend-microservice/platops-example-backend-microservice_0.230.0_0.5.2.tgz",
+        path = "webstore/slugs/platops-example-backend-microservice/platops-example-backend-microservice_0.230.0_0.5.2.tgz",
         fixedVersions = Seq("1.8.1"),
         published = Instant.parse("2025-12-03T16:20:21Z"),
         artefactScanTime = Instant.parse("2024-11-07T15:57:37Z"),
@@ -254,7 +254,7 @@ class XrayServiceSpec
           "generic://sha256:4e8a41cc125be3aa57dec94d45e338798d6d78c3e53fe5ae7e02f8b5d3841f30/platops-example-backend-microservice_0.230.0_0.5.2.tgz",
           "gav://org.lz4:lz4-java:1.8.0"
           ),
-        path = "webstore-local/slugs/platops-example-backend-microservice/platops-example-backend-microservice_0.230.0_0.5.2.tgz",
+        path = "webstore/slugs/platops-example-backend-microservice/platops-example-backend-microservice_0.230.0_0.5.2.tgz",
         fixedVersions = Seq.empty,
         published = Instant.parse("2025-12-05T20:17:54Z"),
         artefactScanTime = Instant.parse("2024-11-07T15:57:37Z"),
@@ -278,7 +278,7 @@ class XrayServiceSpec
           "generic://sha256:4e8a41cc125be3aa57dec94d45e338798d6d78c3e53fe5ae7e02f8b5d3841f30/platops-example-backend-microservice_0.230.0_0.5.2.tgz",
           "gav://org.apache.commons:commons-lang3:3.14.0"
           ),
-        path = "webstore-local/slugs/platops-example-backend-microservice/platops-example-backend-microservice_0.230.0_0.5.2.tgz",
+        path = "webstore/slugs/platops-example-backend-microservice/platops-example-backend-microservice_0.230.0_0.5.2.tgz",
         fixedVersions = Seq("3.18.0"),
         published = Instant.parse("2025-07-12T02:13:52Z"),
         artefactScanTime = Instant.parse("2024-11-07T15:57:37Z"),

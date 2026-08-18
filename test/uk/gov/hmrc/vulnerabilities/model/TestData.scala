@@ -220,7 +220,7 @@ object TestData:
         |        "hello",
         |        "world"
         |      ],
-        |      "path": "webstore-local/slugs/catalogue-frontend/catalogue-frontend_4.254.0_0.0.1.tgz",
+        |      "path": "webstore/slugs/catalogue-frontend/catalogue-frontend_4.254.0_0.0.1.tgz",
         |      "fixed_versions": [
         |        "3.1"
         |      ],
@@ -262,7 +262,7 @@ object TestData:
         |        "hello",
         |        "world"
         |      ],
-        |      "path": "webstore-local/slugs/catalogue-frontend/catalogue-frontend_4.254.0_0.0.1.tgz",
+        |      "path": "webstore/slugs/catalogue-frontend/catalogue-frontend_4.254.0_0.0.1.tgz",
         |      "fixed_versions": [
         |        "3.1"
         |      ],

@@ -79,7 +79,7 @@ class XrayService @Inject()(
     uri        : String,
     flags      : Seq[SlugInfoFlag]
   ):
-    val path = uri.replaceAll(".*/(webstore|webstore-local)/", "webstore-local/")
+    val path = uri.replaceAll(".*/(webstore|webstore-local)/", "webstore/")
 
   object SlugInfo:
     def fromReport(report: Report) =
@@ -155,7 +155,7 @@ class XrayService @Inject()(
                                                   .recover:
                                                     case ex => 
                                                       val msg = ex.getMessage
-                                                      if (warnOnly.exists(s => msg.contains(s"webstore-local/slugs/$s/$s")))
+                                                      if (warnOnly.exists(s => msg.contains(s"webstore/slugs/$s/$s")))
                                                         logger.warn(s"Error calling B&D API $msg", ex)
                                                       else
                                                         logger.error(s"Error calling B&D API $msg", ex)
