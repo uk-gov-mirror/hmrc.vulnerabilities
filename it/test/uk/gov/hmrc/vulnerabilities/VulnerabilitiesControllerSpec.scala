@@ -144,7 +144,7 @@ class VulnerabilitiesControllerSpec
               Report(
                 serviceName    = ServiceName("service1"),
                 serviceVersion = Version("0.835.0"),
-                slugUri        = "https://artifactory/webstore/service1_0.8.35.0.tgz",
+                slugUri        = "https://artifactory/webstore-local/service1_0.8.35.0.tgz",
                 rows           = Seq(vulnModel),
                 generatedDate  = startOfYear,
                 latest         = false,
