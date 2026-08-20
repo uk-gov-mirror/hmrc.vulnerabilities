@@ -76,7 +76,7 @@ class XrayConnectorSpec
     "given a serviceVersionDeployments" should:
       "generate the expected request body" in:
         val expectedRequestBody =
-          """{"name":"AppSec-report-service1_5_4_0","resources":{"repositories":[{"name":"webstore"}]},"filters":{"impacted_artifact":"*/service1_5.4.0_0.5.2.tgz"}}"""
+          """{"name":"AppSec-report-service1_5_4_0","resources":{"repositories":[{"name":"webstore-local"}]},"filters":{"impacted_artifact":"*/service1_5.4.0_0.5.2.tgz"}}"""
 
         stubFor(WireMock.post(urlMatching("/xray/api/v1/reports/vulnerabilities"))
           .withRequestBody(containing(expectedRequestBody))
@@ -93,7 +93,7 @@ class XrayConnectorSpec
     "it receives a valid response" should:
       "return a ReportRequestResponse" in:
         stubFor(WireMock.post(urlMatching("/xray/api/v1/reports/vulnerabilities"))
-          .withRequestBody(containing("""{"name":"AppSec-report-service1_5_4_0","resources":{"repositories":[{"name":"webstore"}]},"filters":{"impacted_artifact":"*/service1_5.4.0_0.5.2.tgz"}}"""))
+          .withRequestBody(containing("""{"name":"AppSec-report-service1_5_4_0","resources":{"repositories":[{"name":"webstore-local"}]},"filters":{"impacted_artifact":"*/service1_5.4.0_0.5.2.tgz"}}"""))
           .willReturn(aResponse().withBody(s"""{"report_id":1,"status":"pending"}""")))
 
         val res = connector.generateReport(ServiceName("service1"), Version("5.4.0"), "some/path/service1_5.4.0_0.5.2.tgz")(token).futureValue
